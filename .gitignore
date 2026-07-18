@@ -1,0 +1,17 @@
+# Vendor SDK / manuals (233 MB, third-party MEIG material - kept local only)
+SLM332L/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
