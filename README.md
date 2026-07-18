@@ -7,6 +7,21 @@ The module is driven entirely by AT commands over a USB/UART COM port. This tool
 gives you a guided button-per-command UI for every protocol in the manuals, an
 auto-detector for the AT port, a raw AT terminal, and a saveable session log.
 
+## Introduction
+
+The **SLM332L** is a MEIG LTE Cat 1 cellular module: you talk to it by sending
+plain-text **AT commands** over a serial port, and it replies with results and
+asynchronous notifications (URCs). Doing that by hand in a terminal is slow and
+error-prone — you have to remember each command's exact syntax, fill in length
+fields, and handle interactive data prompts.
+
+This project replaces that with a small desktop app: pick a protocol, fill a
+couple of fields, click **Send**, and watch the module's response in a live log.
+Ready-made **flows** run whole test sequences (bring up data, publish MQTT, send
+an SMS, get a GNSS fix…) in one click. It's meant for **bench testing and
+bring-up** of a new board — validating the SIM, network registration, and each
+protocol before integrating the module into a product.
+
 ## Protocols covered
 
 | Tab | Commands |
