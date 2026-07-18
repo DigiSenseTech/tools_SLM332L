@@ -34,11 +34,12 @@ auto-detector for the AT port, a raw AT terminal, and a saveable session log.
 ## Run
 
 ```
+cd ToolsDeveloper
 pip install -r requirements.txt
 python -m slm332l_tester
 ```
 
-or just double-click **`run.bat`** on Windows.
+or just double-click **`ToolsDeveloper/run.bat`** on Windows.
 
 ## Usage
 
@@ -77,15 +78,22 @@ or just double-click **`run.bat`** on Windows.
 ## Project layout
 
 ```
-slm332l_tester/
-  serial_worker.py   # serial connection, reader thread, auto-detect, flow runner
-  commands.py        # data-driven catalog of every protocol command
-  flows.py           # end-to-end multi-step test sequences
-  app.py             # Tkinter GUI (connection bar, Flows + protocol tabs, log)
-  __main__.py        # entry point for `python -m slm332l_tester`
-requirements.txt
-run.bat
+ToolsDeveloper/          # the Python tester (developer tools)
+  slm332l_tester/
+    serial_worker.py     # serial connection, reader thread, auto-detect, flow runner
+    commands.py          # data-driven catalog of every protocol command
+    flows.py             # end-to-end multi-step test sequences
+    app.py               # Tkinter GUI (connection bar, Flows + protocol tabs, log)
+    __main__.py          # entry point for `python -m slm332l_tester`
+  requirements.txt
+  run.bat
+drivers/                 # MEIG ASR USB driver + flash doc (needed for COM ports)
+README.md
 ```
 
+> The vendor SDK/manuals (`SLM332L/`, ~233 MB of MEIG specs and the 188 MB flash
+> toolkit) are kept local only and excluded from the repo via `.gitignore`.
+
 The command catalog is data-driven: to add or tweak a command, edit
-`commands.py` — the GUI builds its panels from it automatically.
+`ToolsDeveloper/slm332l_tester/commands.py` — the GUI builds its panels from it
+automatically.
