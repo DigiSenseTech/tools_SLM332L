@@ -29,6 +29,15 @@ SIM_PROFILES = {
         "key": "counter",
         "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"value":$value}',
     },
+    # Plain-text (not JSON) profiles, well suited to the SMS transport.
+    "SMS text alert": {
+        "key": "temp",
+        "template": "SLM332L $dev alert: temp=$temp hum=$hum (seq $seq)",
+    },
+    "SMS position (GPS)": {
+        "key": "gps",
+        "template": "SLM332L $dev pos: $lat,$lon alt=$alt spd=$spd (seq $seq)",
+    },
     "Custom": {
         "key": "custom",
         "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"msg":"hello"}',
