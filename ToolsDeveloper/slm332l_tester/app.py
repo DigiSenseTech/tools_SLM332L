@@ -17,35 +17,10 @@ from tkinter import filedialog, messagebox, ttk
 from .commands import GROUPS, format_command
 from .flows import FLOWS
 from .serial_worker import COMMON_BAUDS, DEFAULT_BAUD, SerialWorker
+from .simulator import SIM_PROFILES, SIM_TRANSPORTS
 
 
 APP_TITLE = "SLM332L Protocol Tester"
-
-# ------------------------------------------------------------- IoT simulator
-# Sensor "device profiles": each defines a payload template using $name
-# placeholders (string.Template, so it coexists with JSON braces) that the
-# engine fills with freshly simulated readings on every cycle.
-SIM_PROFILES = {
-    "Temperature / Humidity": {
-        "key": "temp",
-        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"temp":$temp,"hum":$hum}',
-    },
-    "GPS / GNSS tracker": {
-        "key": "gps",
-        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"lat":$lat,"lon":$lon,'
-                    '"alt":$alt,"spd":$spd}',
-    },
-    "Counter / heartbeat": {
-        "key": "counter",
-        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"value":$value}',
-    },
-    "Custom": {
-        "key": "custom",
-        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"msg":"hello"}',
-    },
-}
-
-SIM_TRANSPORTS = ["MQTT publish", "TCP send", "HTTP POST", "SMS"]
 
 
 class ScrollableFrame(ttk.Frame):

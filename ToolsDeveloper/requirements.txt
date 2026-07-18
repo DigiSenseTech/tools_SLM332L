@@ -1,1 +1,2 @@
 pyserial>=3.5
+PySide6>=6.6   ; needed only for the Qt UI (python -m slm332l_tester.qt_app)

@@ -73,13 +73,27 @@ end without real hardware sensors.
 
 ## Run
 
+Two front-ends share the same backend (serial worker, command catalog, flows,
+simulator). Pick one:
+
+**Modern Qt UI (recommended)** — dark theme, right-hand navigation menu:
+
 ```
 cd ToolsDeveloper
 pip install -r requirements.txt
+python -m slm332l_tester.qt_app
+```
+
+or double-click **`ToolsDeveloper/run_qt.bat`** on Windows.
+
+**Classic Tkinter UI** — no extra dependency beyond `pyserial`:
+
+```
+cd ToolsDeveloper
 python -m slm332l_tester
 ```
 
-or just double-click **`ToolsDeveloper/run.bat`** on Windows.
+or double-click **`ToolsDeveloper/run.bat`**.
 
 ## Usage
 
@@ -123,10 +137,13 @@ ToolsDeveloper/          # the Python tester (developer tools)
     serial_worker.py     # serial connection, reader thread, auto-detect, flow runner
     commands.py          # data-driven catalog of every protocol command
     flows.py             # end-to-end multi-step test sequences
-    app.py               # Tkinter GUI (connection bar, Flows + protocol tabs, log)
-    __main__.py          # entry point for `python -m slm332l_tester`
+    simulator.py         # framework-agnostic IoT device-simulator engine
+    app.py               # Tkinter GUI (classic)
+    qt_app.py            # PySide6 / Qt GUI (modern, recommended)
+    __main__.py          # entry point for `python -m slm332l_tester` (Tkinter)
   requirements.txt
-  run.bat
+  run.bat                # launch Tkinter UI
+  run_qt.bat             # launch Qt UI
 drivers/                 # MEIG ASR USB driver + flash doc (needed for COM ports)
 README.md
 ```
