@@ -7,7 +7,10 @@ over its serial AT interface, plus a raw AT terminal and a saveable log.
 
 import datetime
 import queue
+import random
+import string
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -17,6 +20,32 @@ from .serial_worker import COMMON_BAUDS, DEFAULT_BAUD, SerialWorker
 
 
 APP_TITLE = "SLM332L Protocol Tester"
+
+# ------------------------------------------------------------- IoT simulator
+# Sensor "device profiles": each defines a payload template using $name
+# placeholders (string.Template, so it coexists with JSON braces) that the
+# engine fills with freshly simulated readings on every cycle.
+SIM_PROFILES = {
+    "Temperature / Humidity": {
+        "key": "temp",
+        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"temp":$temp,"hum":$hum}',
+    },
+    "GPS / GNSS tracker": {
+        "key": "gps",
+        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"lat":$lat,"lon":$lon,'
+                    '"alt":$alt,"spd":$spd}',
+    },
+    "Counter / heartbeat": {
+        "key": "counter",
+        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"value":$value}',
+    },
+    "Custom": {
+        "key": "custom",
+        "template": '{"dev":"$dev","ts":$ts,"seq":$seq,"msg":"hello"}',
+    },
+}
+
+SIM_TRANSPORTS = ["MQTT publish", "TCP send", "HTTP POST", "SMS"]
 
 
 class ScrollableFrame(ttk.Frame):
@@ -57,6 +86,11 @@ class App(ttk.Frame):
 
         self.log_queue = queue.Queue()
         self.worker = SerialWorker(on_line=self._on_line)
+
+        # IoT-simulator engine state.
+        self._sim_stop = threading.Event()
+        self._sim_thread = None
+        self._sim_state = {}
 
         self._build_connection_bar()
         self._build_body()
@@ -103,10 +137,20 @@ class App(ttk.Frame):
         paned.pack(side="top", fill="both", expand=True, padx=6, pady=3)
         self._paned = paned
 
-        nb = ttk.Notebook(paned)
+        # Tab strip on the right-hand side ("menu à droite").
+        try:
+            ttk.Style().configure("Right.TNotebook", tabposition="en")
+            nb = ttk.Notebook(paned, style="Right.TNotebook")
+        except Exception:
+            nb = ttk.Notebook(paned)
         paned.add(nb, weight=3)
 
-        # Flows / diagnostics first, then a tab per protocol.
+        # IoT device simulator first, then flows, then a tab per protocol.
+        sim_tab = ScrollableFrame(nb)
+        nb.add(sim_tab, text="IoT Simulator")
+        self._build_simulator(sim_tab.inner)
+
+        # Flows / diagnostics, then a tab per protocol.
         flow_tab = ScrollableFrame(nb)
         nb.add(flow_tab, text="Flows / Diagnostics")
         intro = ttk.Label(
@@ -186,6 +230,246 @@ class App(ttk.Frame):
         self._sys("=== Running flow: %s (%d steps) ===" % (flow["label"], len(steps)))
         self._run_bg(lambda: self.worker.run_sequence(
             steps, on_done=lambda: self._sys("=== Flow finished: %s ===" % flow["label"])))
+
+    # ------------------------------------------------------- IoT simulator UI
+    def _build_simulator(self, parent):
+        intro = ttk.Label(
+            parent, foreground="#555", justify="left", wraplength=760,
+            text="Simulate an IoT device: pick a sensor profile and a transport, "
+                 "set the interval and how many messages, then Start. Each cycle "
+                 "generates fresh readings and publishes them over the module - "
+                 "like a real sensor or GPS tracker pushing telemetry. Needs an "
+                 "active PDP context first (except SMS, which needs a registered SIM).")
+        intro.pack(fill="x", padx=10, pady=(8, 4), anchor="w")
+
+        card = ttk.LabelFrame(parent, text="Device configuration")
+        card.pack(fill="x", padx=8, pady=4, anchor="n")
+        grid = ttk.Frame(card)
+        grid.pack(fill="x", padx=6, pady=6)
+
+        self.sim = {}
+
+        def add(row, col, key, label, default, width=16):
+            ttk.Label(grid, text=label + ":").grid(
+                row=row, column=col, sticky="e", padx=(6, 2), pady=3)
+            var = tk.StringVar(value=default)
+            ttk.Entry(grid, textvariable=var, width=width).grid(
+                row=row, column=col + 1, sticky="w", padx=(0, 10), pady=3)
+            self.sim[key] = var
+            return var
+
+        # Profile + transport dropdowns.
+        ttk.Label(grid, text="Sensor profile:").grid(
+            row=0, column=0, sticky="e", padx=(6, 2), pady=3)
+        self.sim["profile"] = tk.StringVar(value=list(SIM_PROFILES)[0])
+        prof_combo = ttk.Combobox(grid, textvariable=self.sim["profile"], width=22,
+                                  state="readonly", values=list(SIM_PROFILES))
+        prof_combo.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=3)
+        prof_combo.bind("<<ComboboxSelected>>", self._sim_on_profile)
+
+        ttk.Label(grid, text="Transport:").grid(
+            row=0, column=2, sticky="e", padx=(6, 2), pady=3)
+        self.sim["transport"] = tk.StringVar(value=SIM_TRANSPORTS[0])
+        ttk.Combobox(grid, textvariable=self.sim["transport"], width=14,
+                     state="readonly", values=SIM_TRANSPORTS).grid(
+            row=0, column=3, sticky="w", padx=(0, 10), pady=3)
+
+        add(1, 0, "interval", "Interval (s)", "5", width=8)
+        add(1, 2, "count", "Count (0=loop)", "0", width=8)
+
+        add(2, 0, "host", "Host / Broker", "broker.emqx.io", width=22)
+        add(2, 2, "port", "Port", "1883", width=8)
+
+        add(3, 0, "target", "Topic / URL / Number", "test/slm332l", width=22)
+        add(3, 2, "clientid", "Device / Client ID", "slm332l", width=14)
+
+        add(4, 0, "cid", "PDP context", "1", width=8)
+        add(4, 2, "idx", "Client / Conn idx", "0", width=8)
+
+        # Payload template (string.Template $placeholders).
+        ttk.Label(grid, text="Payload template:").grid(
+            row=5, column=0, sticky="e", padx=(6, 2), pady=(8, 3))
+        self.sim["template"] = tk.StringVar(
+            value=SIM_PROFILES[self.sim["profile"].get()]["template"])
+        ttk.Entry(grid, textvariable=self.sim["template"], width=64).grid(
+            row=5, column=1, columnspan=3, sticky="we", padx=(0, 10), pady=(8, 3))
+        ttk.Label(grid, foreground="#888", wraplength=760, justify="left",
+                  text="Placeholders: $dev $ts $seq  +  temp:$temp $hum  "
+                       "gps:$lat $lon $alt $spd  counter:$value").grid(
+            row=6, column=1, columnspan=3, sticky="w", padx=(0, 10))
+
+        # Controls.
+        action = ttk.Frame(card)
+        action.pack(fill="x", padx=6, pady=(2, 8))
+        self.sim_start_btn = ttk.Button(action, text="Start cycle",
+                                        command=self._sim_start)
+        self.sim_start_btn.pack(side="left", padx=(0, 4))
+        self.sim_stop_btn = ttk.Button(action, text="Stop", state="disabled",
+                                       command=self._sim_stop_cycle)
+        self.sim_stop_btn.pack(side="left", padx=4)
+        self.sim_status = tk.StringVar(value="Idle")
+        ttk.Label(action, textvariable=self.sim_status,
+                  foreground="#0a7d28").pack(side="left", padx=12)
+
+    def _sim_on_profile(self, _event=None):
+        prof = SIM_PROFILES.get(self.sim["profile"].get())
+        if prof:
+            self.sim["template"].set(prof["template"])
+
+    # --------------------------------------------------------- simulator engine
+    def _sim_start(self):
+        if not self.worker.is_open():
+            messagebox.showwarning(APP_TITLE, "Connect to a port first.")
+            return
+        if self._sim_thread and self._sim_thread.is_alive():
+            messagebox.showinfo(APP_TITLE, "A simulation cycle is already running.")
+            return
+        try:
+            cfg = {k: v.get().strip() for k, v in self.sim.items()}
+            cfg["interval"] = max(0.2, float(cfg["interval"] or "5"))
+            cfg["count"] = int(cfg["count"] or "0")
+        except ValueError:
+            messagebox.showwarning(APP_TITLE, "Interval and Count must be numbers.")
+            return
+
+        self._sim_state = {}
+        self._sim_stop.clear()
+        self.sim_start_btn.configure(state="disabled")
+        self.sim_stop_btn.configure(state="normal")
+        self.sim_status.set("Running...")
+        self._sim_thread = threading.Thread(
+            target=self._sim_run, args=(cfg,), daemon=True)
+        self._sim_thread.start()
+
+    def _sim_stop_cycle(self):
+        self._sim_stop.set()
+        self.sim_status.set("Stopping...")
+
+    def _sim_run(self, cfg):
+        transport = cfg["transport"]
+        sent = 0
+        try:
+            self._sys("=== IoT simulator: %s over %s (interval %ss, count %s) ===" % (
+                cfg["profile"], transport, cfg["interval"],
+                cfg["count"] or "loop"))
+            if not self._sim_setup(cfg):
+                return
+            i = 0
+            while not self._sim_stop.is_set() and self.worker.is_open():
+                if cfg["count"] and i >= cfg["count"]:
+                    break
+                values = self._sim_values(cfg, i)
+                payload = string.Template(cfg["template"]).safe_substitute(values)
+                self._sim_publish(cfg, payload)
+                sent += 1
+                i += 1
+                self._set_sim_status("Running - sent %d" % sent)
+                if self._sim_stop.wait(cfg["interval"]):
+                    break
+        finally:
+            self._sim_teardown(cfg)
+            self._sys("=== IoT simulator stopped (%d message(s) sent) ===" % sent)
+            self._set_sim_status("Idle")
+            self.master.after(0, self._sim_reset_buttons)
+
+    def _sim_reset_buttons(self):
+        self.sim_start_btn.configure(state="normal")
+        self.sim_stop_btn.configure(state="disabled")
+
+    def _set_sim_status(self, text):
+        self.master.after(0, lambda: self.sim_status.set(text))
+
+    def _sim_values(self, cfg, i):
+        """Generate one simulated reading for iteration ``i``."""
+        vals = {
+            "dev": cfg.get("clientid") or "slm332l",
+            "ts": int(time.time()),
+            "seq": i,
+        }
+        key = SIM_PROFILES.get(cfg["profile"], {}).get("key", "custom")
+        if key == "temp":
+            vals["temp"] = round(random.uniform(18.0, 32.0), 1)
+            vals["hum"] = round(random.uniform(35.0, 75.0), 1)
+        elif key == "gps":
+            # Random-walk around a base point (Casablanca by default).
+            lat = self._sim_state.get("lat", 33.5731)
+            lon = self._sim_state.get("lon", -7.5898)
+            lat += random.uniform(-0.0005, 0.0005)
+            lon += random.uniform(-0.0005, 0.0005)
+            self._sim_state["lat"] = lat
+            self._sim_state["lon"] = lon
+            vals["lat"] = round(lat, 6)
+            vals["lon"] = round(lon, 6)
+            vals["alt"] = round(random.uniform(10.0, 60.0), 1)
+            vals["spd"] = round(random.uniform(0.0, 20.0), 1)
+        elif key == "counter":
+            vals["value"] = i
+        return vals
+
+    def _sim_cmd(self, cmd, data=None, end="", wait=0.0):
+        """Send one command from the simulator thread and pause briefly."""
+        if self._sim_stop.is_set() or not self.worker.is_open():
+            return
+        self.worker.send_command(cmd, data=data, end=end)
+        if wait:
+            self._sim_stop.wait(wait)
+
+    def _blen(self, text):
+        return len(text.encode("utf-8", "replace"))
+
+    def _sim_setup(self, cfg):
+        """Open/connect the transport once before the send loop. Returns ok."""
+        t = cfg["transport"]
+        idx, cid = cfg["idx"] or "0", cfg["cid"] or "1"
+        if t == "MQTT publish":
+            self._sim_cmd('AT+QMTCFG="pdpcid",%s,%s' % (idx, cid), wait=0.5)
+            self._sim_cmd('AT+QMTOPEN=%s,"%s",%s' % (idx, cfg["host"], cfg["port"]),
+                          wait=5.0)
+            self._sim_cmd('AT+QMTCONN=%s,"%s"' % (idx, cfg["clientid"] or "slm332l"),
+                          wait=4.0)
+        elif t == "TCP send":
+            self._sim_cmd('AT+QIOPEN=%s,%s,"TCP","%s",%s,0,1' % (
+                cid, idx, cfg["host"], cfg["port"]), wait=4.0)
+        elif t == "HTTP POST":
+            self._sim_cmd('AT+QHTTPCFG="contextid",%s' % cid, wait=0.5)
+        elif t == "SMS":
+            self._sim_cmd("AT+CMGF=1", wait=0.4)
+            self._sim_cmd('AT+CSCS="GSM"', wait=0.4)
+        return not self._sim_stop.is_set()
+
+    def _sim_publish(self, cfg, payload):
+        """Send one telemetry message over the chosen transport."""
+        t = cfg["transport"]
+        idx = cfg["idx"] or "0"
+        self._sys("tx: %s" % payload)
+        if t == "MQTT publish":
+            self._sim_cmd('AT+QMTPUBEX=%s,1,0,0,"%s",%d' % (
+                idx, cfg["target"], self._blen(payload)), data=payload)
+        elif t == "TCP send":
+            self._sim_cmd("AT+QISEND=%s,%d" % (idx, self._blen(payload)),
+                          data=payload)
+        elif t == "HTTP POST":
+            url = cfg["target"]
+            self._sim_cmd("AT+QHTTPURL=%d,80" % self._blen(url), data=url, wait=1.0)
+            self._sim_cmd("AT+QHTTPPOST=%d,80,80" % self._blen(payload), data=payload,
+                          wait=2.0)
+        elif t == "SMS":
+            self._sim_cmd('AT+CMGS="%s"' % cfg["target"], data=payload, end=chr(26))
+
+    def _sim_teardown(self, cfg):
+        t = cfg["transport"]
+        idx = cfg["idx"] or "0"
+        if not self.worker.is_open():
+            return
+        # Clear the stop flag locally so teardown commands still transmit.
+        try:
+            if t == "MQTT publish":
+                self.worker.send_command("AT+QMTDISC=%s" % idx)
+                self.worker.send_command("AT+QMTCLOSE=%s" % idx)
+            elif t == "TCP send":
+                self.worker.send_command("AT+QICLOSE=%s" % idx)
+        except Exception:
+            pass
 
     def _build_card(self, parent, spec):
         card = ttk.LabelFrame(parent, text=spec["label"])
@@ -414,6 +698,7 @@ class App(ttk.Frame):
         threading.Thread(target=func, daemon=True).start()
 
     def _on_close(self):
+        self._sim_stop.set()
         try:
             self.worker.close()
         finally:

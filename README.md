@@ -26,6 +26,7 @@ protocol before integrating the module into a product.
 
 | Tab | Commands |
 |-----|----------|
+| **IoT Simulator** | Simulate an IoT device: pick a sensor profile + transport, set interval/count, and loop-send simulated telemetry (see below) |
 | **Flows / Diagnostics** | One-click end-to-end sequences: Module diagnostic, Bring up data (PDP), Ping/DNS/NTP, HTTP GET, TCP echo, MQTT publish, GNSS fix, WiFi scan |
 | Basic / Module | AT, ATI, firmware, IMEI, IMSI, ICCID, SIM status, signal (CSQ), registration, operator, network info, CFUN, echo |
 | Data / PDP context | QICSGP (APN), QIACT / QIACT? / QIDEACT, CGATT |
@@ -37,6 +38,30 @@ protocol before integrating the module into a product.
 | GNSS | MGPSINFO, MGPSCFG, MGPS, MGPSLOC, MGPSNMEA, MGPSEND |
 | WiFi Scan | *WIFICTRL (query / config / start / stop) |
 | SMS | CMGF, CSCS, CSCA, **CMGS (simple sender)**, CMGL, CMGR, CMGD, CNMI, CPMS |
+
+## IoT device simulator
+
+The **IoT Simulator** tab turns the module into a fake sensor/tracker that pushes
+telemetry on a timer — useful for testing a broker, backend, or dashboard end to
+end without real hardware sensors.
+
+1. Bring up data first (**Flows → Bring up data**, or the Data / PDP tab).
+2. On the **IoT Simulator** tab, choose:
+   - **Sensor profile** — *Temperature / Humidity*, *GPS / GNSS tracker*,
+     *Counter / heartbeat*, or *Custom*. Each ships a JSON **payload template**
+     using `$placeholders` filled with fresh simulated readings every cycle
+     (`$ts`, `$seq`, `$temp`, `$hum`, `$lat`, `$lon`, `$alt`, `$spd`, `$value`…).
+     The GPS profile random-walks around a base coordinate.
+   - **Transport** — *MQTT publish*, *TCP send*, *HTTP POST*, or *SMS*.
+   - **Interval** (seconds) and **Count** (`0` = loop forever).
+   - Connection fields: Host/Broker, Port, Topic/URL/Number, Device/Client ID,
+     PDP context, Client/Conn index.
+3. **Start cycle** opens/connects the transport once, then sends a new reading
+   every interval; **Stop** halts the loop and disconnects cleanly. Every frame
+   is echoed in the log as `~ tx: {...}`.
+
+> SMS transport actually sends messages (needs a registered SIM and may cost
+> money) — keep the count small when testing.
 
 ## Requirements
 
