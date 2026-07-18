@@ -22,6 +22,24 @@ an SMS, get a GNSS fix…) in one click. It's meant for **bench testing and
 bring-up** of a new board — validating the SIM, network registration, and each
 protocol before integrating the module into a product.
 
+## Screenshots
+
+The modern Qt UI — dark theme, right-hand navigation menu, live coloured log.
+
+**IoT device simulator** — configure a sensor + transport and loop-send telemetry:
+
+![IoT Simulator](docs/screenshots/qt-simulator.png)
+
+**Flows / Diagnostics** — one-click end-to-end test sequences:
+
+![Flows / Diagnostics](docs/screenshots/qt-flows.png)
+
+**MQTT protocol tab** — a card per command, built from the data-driven catalog:
+
+![MQTT tab](docs/screenshots/qt-mqtt.png)
+
+> Log content in these shots is illustrative sample output.
+
 ## Protocols covered
 
 | Tab | Commands |
